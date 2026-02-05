@@ -1,0 +1,150 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Premium Palette - Light Mode */
+    --bg-primary: #ffffff;
+    --bg-secondary: #f8fafc;
+    /* Slate 50 */
+    --accent-primary: #3b82f6;
+    /* Blue 500 */
+    --accent-glow: rgba(59, 130, 246, 0.15);
+    --text-primary: #0f172a;
+    --text-secondary: #64748b;
+    --border-color: #e2e8f0;
+    --quiet-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  }
+
+  .dark {
+    /* Premium Palette - Dark Mode */
+    --bg-primary: #020617;
+    /* Slate 950 */
+    --bg-secondary: #0f172a;
+    /* Slate 900 */
+    --accent-primary: #60a5fa;
+    /* Blue 400 */
+    --accent-glow: rgba(96, 165, 250, 0.15);
+    --text-primary: #f8fafc;
+    /* Slate 50 */
+    --text-secondary: #94a3b8;
+    /* Slate 400 */
+    --border-color: #1e293b;
+    /* Slate 800 */
+  }
+
+  body {
+    @apply antialiased text-slate-900 dark:text-slate-50 bg-slate-50 dark:bg-slate-950 font-sans selection:bg-blue-500/30 selection:text-blue-600 dark:selection:text-blue-300;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: 'Outfit', sans-serif;
+  }
+
+  p,
+  span,
+  div,
+  button {
+    font-family: 'Inter', sans-serif;
+  }
+
+  /* Premium Scrollbar */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-300 dark:bg-slate-700 rounded-full border-2 border-transparent bg-clip-content hover:bg-slate-400 dark:hover:bg-slate-600 transition-colors;
+  }
+
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
+@layer utilities {
+  .glass-card {
+    @apply bg-white/70 dark:bg-slate-900/70 border border-slate-200/50 dark:border-slate-800/50 backdrop-blur-md shadow-sm;
+  }
+
+  .glass-panel {
+    @apply bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl border border-white/20 dark:border-white/10;
+    box-shadow:
+      0 8px 32px 0 rgba(31, 38, 135, 0.07),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+  }
+
+  .glass-panel-hero {
+    @apply bg-white/40 dark:bg-slate-900/30 backdrop-blur-3xl border border-white/30 dark:border-white/10;
+    box-shadow:
+      0 20px 60px 0 rgba(31, 38, 135, 0.1),
+      0 1px 0 0 rgba(255, 255, 255, 0.2) inset,
+      0 -1px 0 0 rgba(0, 0, 0, 0.05) inset;
+  }
+
+  .glass-card-nav {
+    @apply bg-white/60 dark:bg-slate-950/60 backdrop-blur-xl;
+    box-shadow: 0 4px 24px 0 rgba(31, 38, 135, 0.05);
+  }
+
+  .text-glow {
+    text-shadow: 0 0 20px var(--accent-glow);
+  }
+
+  @keyframes gradient {
+
+    0%,
+    100% {
+      background-position: 0% 50%;
+    }
+
+    50% {
+      background-position: 100% 50%;
+    }
+  }
+
+  .animate-gradient {
+    background-size: 200% 200%;
+    animation: gradient 6s ease infinite;
+  }
+
+  @keyframes pulse-slow {
+
+    0%,
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    50% {
+      opacity: 0.8;
+      transform: scale(1.05);
+    }
+  }
+
+  .animate-pulse-slow {
+    animation: pulse-slow 4s ease-in-out infinite;
+  }
+
+  .animation-delay-1000 {
+    animation-delay: 1s;
+  }
+
+  /* Performance optimization - reduce motion for accessibility */
+  @media (prefers-reduced-motion: reduce) {
+
+    .animate-gradient,
+    .animate-pulse-slow {
+      animation: none;
+    }
+  }
+}
