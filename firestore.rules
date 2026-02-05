@@ -24,9 +24,16 @@ service cloud.firestore {
     match /projects/{projectId} {
       allow create, read: if request.auth != null;
       
-      // Only project owner can update project settings (including members)
-      allow update: if request.auth != null && 
-                      get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId == request.auth.uid;
+      // Only project owner can update project settings, but users can add themselves
+      allow update: if request.auth != null && (
+                      get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId == request.auth.uid ||
+                      (
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members']) &&
+                        request.resource.data.members.hasAll(resource.data.members) &&
+                        request.resource.data.members.size() == resource.data.members.size() + 1 &&
+                        request.resource.data.members.hasAny([request.auth.uid])
+                      )
+                    );
 
       // Allow deletion only if the user is the owner
       allow delete: if request.auth != null && 
