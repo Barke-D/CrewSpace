@@ -76,7 +76,8 @@ const LandingPage: React.FC = () => {
             <main className="pt-48 md:pt-56">
                 {/* Hero Section */}
                 <section className="max-w-7xl mx-auto px-6 mb-24 lg:mb-32">
-                    <div
+                    <motion.div
+                        style={{ opacity: heroOpacity, scale: heroScale }}
                         className="max-w-4xl mx-auto text-center space-y-10"
                     >
                         <motion.div
@@ -111,7 +112,7 @@ const LandingPage: React.FC = () => {
                                 See How It Works
                             </button>
                         </div>
-                    </div>
+                    </motion.div>
                 </section>
 
                 {/* Sub-Hero / Problem Statement */}

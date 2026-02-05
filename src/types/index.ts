@@ -6,6 +6,11 @@ export interface User {
     displayName: string | null;
     photoURL: string | null;
     username: string;
+    groupNumber?: string;
+    school?: string;
+    major?: string;
+    year?: string;
+    bio?: string;
     createdAt: Timestamp;
     updatedAt: Timestamp;
 }
@@ -14,7 +19,7 @@ export interface Project {
     id: string;
     name: string;
     course: string;
-    deadline: Timestamp;
+    deadline?: Timestamp;
     ownerId: string;
     members: string[]; // User UIDs
     inviteCode: string;
