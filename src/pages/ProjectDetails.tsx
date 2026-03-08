@@ -22,7 +22,7 @@ import {
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { Project, Task, User, TaskWeight, Activity, SubTask, TaskStatus, Notification } from '../types';
-import { Loader2, Plus, Calendar, CheckCircle, Clock, Share2, ArrowLeft, Layout, BarChart2, List, Trash2, MessageSquare, AlertTriangle, Edit3 } from 'lucide-react';
+import { Loader2, Plus, Calendar, CheckCircle, Clock, Share2, ArrowLeft, Layout, BarChart2, List, Trash2, MessageSquare, AlertTriangle, Edit3, Upload, Download } from 'lucide-react';
 import NotificationPanel from '../components/NotificationPanel';
 import { useProjects } from '../hooks/useProjects';
 import { useAlert } from '../context/AlertContext';
@@ -36,6 +36,7 @@ import ChatSystem from '../components/ChatSystem';
 import { AccountabilityEngine } from '../lib/AccountabilityEngine';
 import EditTaskModal from '../components/EditTaskModal';
 import { format } from 'date-fns';
+import { downloadFile } from '../utils/downloadFile';
 
 type Tab = 'tasks' | 'calendar' | 'analytics' | 'chat' | 'settings';
 
@@ -58,12 +59,17 @@ const ProjectDetails: React.FC = () => {
     const [newTaskDesc, setNewTaskDesc] = useState('');
     const [newTaskDate, setNewTaskDate] = useState('');
     const [newTaskWeight, setNewTaskWeight] = useState<TaskWeight>('medium');
-    const [newSubTasks, setNewSubTasks] = useState<{ title: string, deadline: string, assignedTo: string }[]>([]);
+    const [newSubTasks, setNewSubTasks] = useState<{ title: string, deadline: string, assignedTo: string, requiresUpload: boolean }[]>([]);
 
     const [isDeleting, setIsDeleting] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [confirmName, setConfirmName] = useState('');
     const [editingTask, setEditingTask] = useState<Task | null>(null);
+
+    // File-upload-required feature state
+    const [newTaskRequiresUpload, setNewTaskRequiresUpload] = useState(false);
+    const [uploadingTaskId, setUploadingTaskId] = useState<string | null>(null);
+    const [taskUploadProgress, setTaskUploadProgress] = useState(0);
 
     // Fetch Project & Activity
     useEffect(() => {
@@ -236,11 +242,10 @@ const ProjectDetails: React.FC = () => {
                     id: `st-${Date.now()}-${i}`,
                     title: st.title,
                     status: 'todo',
-                    deadline: st.deadline ? Timestamp.fromDate(new Date(st.deadline)) : Timestamp.now()
+                    requiresUpload: st.requiresUpload,
+                    deadline: st.deadline ? Timestamp.fromDate(new Date(st.deadline)) : Timestamp.now(),
+                    assignedTo: st.assignedTo || ''
                 };
-                if (st.assignedTo) {
-                    subTask.assignedTo = st.assignedTo;
-                }
                 return subTask;
             });
 
@@ -252,6 +257,7 @@ const ProjectDetails: React.FC = () => {
             weight: newTaskWeight,
             deadline: Timestamp.fromDate(new Date(newTaskDate)),
             assignedTo: project?.type === 'personal' ? [currentUser.uid] : [],
+            requiresUpload: project?.type !== 'personal' && newTaskRequiresUpload,
             subTasks: subTasksList,
             createdBy: currentUser.uid,
             createdAt: serverTimestamp() as Timestamp,
@@ -296,6 +302,7 @@ const ProjectDetails: React.FC = () => {
         setNewTaskDesc('');
         setNewTaskDate('');
         setNewSubTasks([]);
+        setNewTaskRequiresUpload(false);
     };
 
     const toggleTaskStatus = async (task: Task) => {
@@ -312,6 +319,12 @@ const ProjectDetails: React.FC = () => {
 
         if (newStatus === 'done' && !isAssigned && !isOwner && !isPersonal) {
             showAlert("Only assigned members or the project creator can mark this task as complete.", "error");
+            return;
+        }
+
+        // Block completion if file upload is required but not yet submitted
+        if (newStatus === 'done' && task.requiresUpload && !task.submissionUrl && !isOwner) {
+            showAlert("This task requires a file submission before it can be marked complete. Please upload your file first.", "error");
             return;
         }
 
@@ -341,6 +354,17 @@ const ProjectDetails: React.FC = () => {
             await updateDoc(doc(db, 'projects', projectId, 'tasks', task.id), updates);
             if (newStatus === 'done') {
                 await logActivity(isLate ? 'task_late' : 'task_completed', `completed "${task.title}"${isLate ? ' LATE' : ''}`);
+
+                // Notify project owner when a task is completed by someone else
+                if (project?.ownerId && project.ownerId !== currentUser.uid) {
+                    await sendNotification(project.ownerId, {
+                        userId: project.ownerId,
+                        type: 'project_update',
+                        title: project.name,
+                        message: `${currentUser.displayName || 'A team member'} completed "${task.title}"${isLate ? ' (Late)' : ''}`,
+                        link: `/project/${projectId}`
+                    });
+                }
             }
         } catch (err) {
             console.error("Error updating status:", err);
@@ -365,6 +389,13 @@ const ProjectDetails: React.FC = () => {
         const updatedSubTasks = task.subTasks?.map((st: SubTask) => {
             if (st.id === subTaskId) {
                 const newStatus = st.status === 'done' ? 'todo' : 'done';
+
+                // Block completion if file upload is required but not yet submitted
+                if (newStatus === 'done' && st.requiresUpload && !st.submissionUrl && !isOwner) {
+                    showAlert(`The sub-task "${st.title}" requires a file submission before it can be marked complete.`, "error");
+                    return st;
+                }
+
                 const updates: Partial<SubTask> = { status: newStatus };
 
                 if (newStatus === 'done') {
@@ -390,6 +421,21 @@ const ProjectDetails: React.FC = () => {
             subTasks: updatedSubTasks,
             updatedAt: serverTimestamp()
         });
+
+        // Notify project owner when a sub-task is completed by someone else
+        const toggledSubTask = task.subTasks?.find(st => st.id === subTaskId);
+        const subTaskNow = updatedSubTasks?.find(st => st.id === subTaskId);
+        if (subTaskNow?.status === 'done' && toggledSubTask?.status !== 'done') {
+            if (project?.ownerId && project.ownerId !== currentUser.uid) {
+                await sendNotification(project.ownerId, {
+                    userId: project.ownerId,
+                    type: 'project_update',
+                    title: project.name,
+                    message: `${currentUser.displayName || 'A team member'} completed sub-task "${subTaskNow.title}"`,
+                    link: `/project/${projectId}`
+                });
+            }
+        }
     };
 
     const joinTask = async (task: Task) => {
@@ -472,6 +518,98 @@ const ProjectDetails: React.FC = () => {
         }
     };
 
+    // ── Task / Sub-task File Submission Upload (Cloudinary) ─────────────────
+    const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME as string;
+    const CLOUDINARY_UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET as string;
+
+    const handleTaskFileUpload = async (item: Task | { id: string, title: string, isSubTask: boolean, parentTaskId: string }, file: File) => {
+        if (!currentUser || !projectId || isGuest) return;
+
+        const itemId = item.id;
+        const isSubTask = 'isSubTask' in item && item.isSubTask;
+        const parentTaskId = isSubTask ? (item as any).parentTaskId : itemId;
+
+        setUploadingTaskId(itemId);
+        setTaskUploadProgress(0);
+
+        try {
+            console.log('📤 Starting Cloudinary task submission upload...');
+
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+            formData.append('public_id', `tasks/${projectId}/${itemId}_${Date.now()}_${file.name}`);
+
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/upload`, true);
+
+            xhr.upload.onprogress = (ev) => {
+                if (ev.lengthComputable) {
+                    setTaskUploadProgress(Math.round((ev.loaded / ev.total) * 100));
+                }
+            };
+
+            xhr.onload = async () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    const result = JSON.parse(xhr.responseText);
+                    const url: string = result.secure_url;
+                    console.log('✅ Cloudinary task submission upload complete:', url);
+
+                    try {
+                        if (isSubTask) {
+                            const parentTask = tasks.find(t => t.id === parentTaskId);
+                            if (parentTask) {
+                                const updatedSubTasks = parentTask.subTasks?.map(st => {
+                                    if (st.id === itemId) {
+                                        return { ...st, submissionUrl: url, submissionFileName: file.name };
+                                    }
+                                    return st;
+                                });
+                                await updateDoc(doc(db, 'projects', projectId, 'tasks', parentTaskId), {
+                                    subTasks: updatedSubTasks,
+                                    updatedAt: serverTimestamp()
+                                });
+                            }
+                        } else {
+                            await updateDoc(doc(db, 'projects', projectId, 'tasks', itemId), {
+                                submissionUrl: url,
+                                submissionFileName: file.name,
+                                updatedAt: serverTimestamp()
+                            });
+                        }
+
+                        showAlert('File submitted successfully!', 'success');
+                    } catch (err) {
+                        console.error('❌ Error saving submission URL to Firestore:', err);
+                        showAlert('File uploaded but failed to save. Please try again.', 'error');
+                    } finally {
+                        setUploadingTaskId(null);
+                        setTaskUploadProgress(0);
+                    }
+                } else {
+                    console.error('❌ Cloudinary submission upload error:', xhr.statusText, xhr.responseText);
+                    showAlert(`Upload failed: ${xhr.statusText}`, 'error');
+                    setUploadingTaskId(null);
+                    setTaskUploadProgress(0);
+                }
+            };
+
+            xhr.onerror = () => {
+                console.error('❌ Submission upload network error');
+                showAlert('Failed to start upload. Check your connection.', 'error');
+                setUploadingTaskId(null);
+                setTaskUploadProgress(0);
+            };
+
+            xhr.send(formData);
+        } catch (err: any) {
+            console.error('❌ Error starting submission upload:', err);
+            showAlert(`Failed to start upload: ${err.message}`, 'error');
+            setUploadingTaskId(null);
+            setTaskUploadProgress(0);
+        }
+    };
+
     const copyInvite = () => {
         if (!project) return;
         const url = `${window.location.origin}/join/${project.inviteCode}`;
@@ -480,7 +618,7 @@ const ProjectDetails: React.FC = () => {
     };
 
     const addSubTaskRow = () => {
-        setNewSubTasks([...newSubTasks, { title: '', deadline: '', assignedTo: '' }]);
+        setNewSubTasks([...newSubTasks, { title: '', deadline: '', assignedTo: '', requiresUpload: false }]);
     };
 
     const removeSubTaskRow = (index: number) => {
@@ -684,6 +822,27 @@ const ProjectDetails: React.FC = () => {
                                                                 ))}
                                                             </select>
                                                         )}
+
+                                                        {/* Sub-task File Toggle */}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                const list = [...newSubTasks];
+                                                                list[i].requiresUpload = !list[i].requiresUpload;
+                                                                setNewSubTasks(list);
+                                                            }}
+                                                            className={cn(
+                                                                "p-1.5 rounded-lg border transition-all flex items-center gap-1.5",
+                                                                st.requiresUpload
+                                                                    ? "bg-blue-50 border-blue-200 text-blue-600 dark:bg-blue-900/20 dark:border-blue-800"
+                                                                    : "bg-slate-50 border-slate-100 text-slate-400 dark:bg-slate-900/50 dark:border-slate-800"
+                                                            )}
+                                                            title="Require file upload for this sub-task"
+                                                        >
+                                                            <Upload className="w-3.5 h-3.5" />
+                                                            {st.requiresUpload && <span className="text-[10px] font-bold">Required</span>}
+                                                        </button>
+
                                                         <button
                                                             type="button"
                                                             onClick={() => removeSubTaskRow(i)}
@@ -730,6 +889,34 @@ const ProjectDetails: React.FC = () => {
                                                         </div>
                                                     )}
                                                 </div>
+
+                                                {/* File Upload Required Toggle (team tasks only) */}
+                                                {!isPersonal && (
+                                                    <div
+                                                        onClick={() => setNewTaskRequiresUpload(prev => !prev)}
+                                                        className={cn(
+                                                            "flex items-center gap-3 cursor-pointer select-none p-3 rounded-xl border transition-all mt-2",
+                                                            newTaskRequiresUpload
+                                                                ? "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800"
+                                                                : "bg-slate-50 dark:bg-slate-900/50 border-slate-100 dark:border-slate-800 hover:border-blue-200 dark:hover:border-blue-900/50"
+                                                        )}
+                                                    >
+                                                        <div className={cn(
+                                                            "w-10 h-5 rounded-full relative flex-shrink-0 transition-colors duration-300",
+                                                            newTaskRequiresUpload ? "bg-blue-600" : "bg-slate-300 dark:bg-slate-700"
+                                                        )}>
+                                                            <div className={cn(
+                                                                "absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all duration-300",
+                                                                newTaskRequiresUpload ? "left-5" : "left-0.5"
+                                                            )} />
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-xs font-bold text-slate-900 dark:text-white">Requires file upload to complete</p>
+                                                            <p className="text-[10px] text-slate-500">Assigned member must upload a file before marking this done</p>
+                                                        </div>
+                                                    </div>
+                                                )}
+
                                                 <div className="flex gap-3">
                                                     <button
                                                         type="button"
@@ -788,7 +975,11 @@ const ProjectDetails: React.FC = () => {
                                                     }}
                                                     className={cn(
                                                         "mt-1 w-7 h-7 rounded-full border-2 flex items-center justify-center transition-all shrink-0",
-                                                        isDone ? "bg-emerald-500 border-emerald-500 text-white" : "border-slate-300 dark:border-slate-600 hover:border-blue-600 text-transparent hover:text-blue-600"
+                                                        isDone
+                                                            ? "bg-emerald-500 border-emerald-500 text-white"
+                                                            : (task.requiresUpload && !task.submissionUrl
+                                                                ? "border-amber-400 text-amber-300 cursor-not-allowed opacity-70"
+                                                                : "border-slate-300 dark:border-slate-600 hover:border-blue-600 text-transparent hover:text-blue-600")
                                                     )}
                                                 >
                                                     <CheckCircle className="w-5 h-5 pointer-events-none" />
@@ -835,8 +1026,52 @@ const ProjectDetails: React.FC = () => {
                                                                                 {st.title}
                                                                             </span>
                                                                             {st.isLate && <span className="text-[8px] font-black uppercase text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 ml-1">Late</span>}
+                                                                            {st.requiresUpload && (
+                                                                                <span className={cn(
+                                                                                    "text-[8px] font-black uppercase px-1.5 py-0.5 rounded border ml-1",
+                                                                                    st.submissionUrl
+                                                                                        ? "text-emerald-600 bg-emerald-50 border-emerald-200"
+                                                                                        : "text-amber-600 bg-amber-50 border-amber-200"
+                                                                                )}>
+                                                                                    {st.submissionUrl ? "File✓" : "File Req"}
+                                                                                </span>
+                                                                            )}
                                                                         </div>
                                                                         <div className="flex items-center gap-3 opacity-60 group-hover/st:opacity-100 transition-opacity">
+                                                                            {/* Sub-task upload button */}
+                                                                            {st.requiresUpload && st.assignedTo === currentUser?.uid && st.status !== 'done' && (
+                                                                                <div className="flex items-center gap-2">
+                                                                                    {uploadingTaskId === st.id ? (
+                                                                                        <div className="flex items-center gap-1">
+                                                                                            <Loader2 className="w-3 h-3 animate-spin text-blue-500" />
+                                                                                            <span className="text-[9px] font-bold text-blue-600">{taskUploadProgress}%</span>
+                                                                                        </div>
+                                                                                    ) : (
+                                                                                        <label className="cursor-pointer flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-bold uppercase transition-colors bg-amber-500 hover:bg-amber-600 text-white">
+                                                                                            <Upload className="w-2.5 h-2.5" />
+                                                                                            {st.submissionUrl ? 'Re' : 'UP'}
+                                                                                            <input
+                                                                                                type="file"
+                                                                                                className="hidden"
+                                                                                                onChange={(e) => {
+                                                                                                    const file = e.target.files?.[0];
+                                                                                                    if (file) handleTaskFileUpload({ id: st.id, title: st.title, isSubTask: true, parentTaskId: task.id }, file);
+                                                                                                    e.target.value = '';
+                                                                                                }}
+                                                                                            />
+                                                                                        </label>
+                                                                                    )}
+                                                                                </div>
+                                                                            )}
+                                                                            {st.submissionUrl && (
+                                                                                <button
+                                                                                    onClick={() => downloadFile(st.submissionUrl!, st.submissionFileName || 'file')}
+                                                                                    className="text-[10px] text-blue-500 hover:underline font-bold flex items-center gap-0.5"
+                                                                                    title="Download submitted file"
+                                                                                >
+                                                                                    <Download className="w-2.5 h-2.5" /> Download
+                                                                                </button>
+                                                                            )}
                                                                             <span className="text-[10px] font-medium text-slate-400">
                                                                                 {st.deadline ? format(st.deadline.toDate(), 'MMM d') : ''}
                                                                             </span>
@@ -849,6 +1084,75 @@ const ProjectDetails: React.FC = () => {
                                                                     </div>
                                                                 );
                                                             })}
+                                                        </div>
+                                                    )}
+
+                                                    {/* Task File Submission Panel */}
+                                                    {task.requiresUpload && (
+                                                        <div className={cn(
+                                                            "flex items-center gap-3 p-3 rounded-2xl border",
+                                                            task.submissionUrl
+                                                                ? "bg-emerald-50 dark:bg-emerald-900/10 border-emerald-200 dark:border-emerald-900/30"
+                                                                : "bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800/40"
+                                                        )}>
+                                                            <Upload className={cn("w-4 h-4 shrink-0", task.submissionUrl ? "text-emerald-600" : "text-amber-600")} />
+                                                            <div className="flex-1 min-w-0">
+                                                                <p className={cn(
+                                                                    "text-[10px] font-black uppercase tracking-widest",
+                                                                    task.submissionUrl ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400"
+                                                                )}>
+                                                                    {task.submissionUrl ? "File Submitted ✓" : "File Submission Required"}
+                                                                </p>
+                                                                <p className="text-xs text-slate-500 truncate">
+                                                                    {task.submissionUrl
+                                                                        ? (task.submissionFileName || "File uploaded")
+                                                                        : "Upload a file to complete this task"}
+                                                                </p>
+                                                                {uploadingTaskId === task.id && (
+                                                                    <div className="mt-1.5 h-1 bg-amber-200 dark:bg-amber-900 rounded-full overflow-hidden">
+                                                                        <div
+                                                                            className="h-full bg-amber-500 rounded-full transition-all duration-300"
+                                                                            style={{ width: `${taskUploadProgress}%` }}
+                                                                        />
+                                                                    </div>
+                                                                )}
+                                                            </div>
+
+                                                            {/* Download button if file already submitted */}
+                                                            {task.submissionUrl && (
+                                                                <button
+                                                                    onClick={() => downloadFile(task.submissionUrl!, task.submissionFileName || 'submission')}
+                                                                    className="shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors"
+                                                                    title="Download submitted file"
+                                                                >
+                                                                    <Download className="w-3 h-3" /> Download
+                                                                </button>
+                                                            )}
+
+                                                            {/* Upload button — only for assigned members on todo tasks */}
+                                                            {task.assignedTo.includes(currentUser?.uid || '') && !isDone && (
+                                                                uploadingTaskId === task.id ? (
+                                                                    <div className="flex items-center gap-1.5 shrink-0">
+                                                                        <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+                                                                        <span className="text-[10px] font-bold text-blue-600">{taskUploadProgress}%</span>
+                                                                    </div>
+                                                                ) : (
+                                                                    <label className="cursor-pointer shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-colors
+                                                                        bg-amber-500 hover:bg-amber-600 text-white">
+                                                                        <Upload className="w-3 h-3" />
+                                                                        {task.submissionUrl ? 'Replace' : 'Upload'}
+                                                                        <input
+                                                                            type="file"
+                                                                            className="hidden"
+                                                                            onChange={(e) => {
+                                                                                const file = e.target.files?.[0];
+                                                                                if (file) handleTaskFileUpload(task, file);
+                                                                                e.target.value = '';
+                                                                            }}
+                                                                        />
+                                                                    </label>
+                                                                )
+                                                            )}
                                                         </div>
                                                     )}
 

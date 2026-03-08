@@ -27,8 +27,9 @@ export const db = initializeFirestore(app, {
     experimentalForceLongPolling: true,
 });
 
-// Initialize Firebase Storage for profile photos
-export const storage = getStorage(app);
+// Initialize Firebase Storage — pass the bucket URL explicitly so the SDK
+// resolves the new .firebasestorage.app domain correctly on all platforms.
+export const storage = getStorage(app, `gs://${firebaseConfig.storageBucket}`);
 
 // Debug: Listen to auth state changes
 onAuthStateChanged(auth, (user) => {

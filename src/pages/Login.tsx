@@ -3,12 +3,9 @@ import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { auth, db } from '../lib/firebase';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
-import { Layout } from 'lucide-react';
 
 const Login: React.FC = () => {
     const navigate = useNavigate();
-    const { loginAsGuest } = useAuth();
     const [isLoggingIn, setIsLoggingIn] = React.useState(false);
 
     const handleGoogleLogin = async () => {
@@ -50,10 +47,6 @@ const Login: React.FC = () => {
         }
     };
 
-    const handleGuestLogin = () => {
-        loginAsGuest();
-        navigate('/dashboard');
-    };
 
     return (
         <div className="min-h-screen flex bg-white dark:bg-slate-950 transition-colors duration-300">
@@ -102,18 +95,6 @@ const Login: React.FC = () => {
                             )}
                         </button>
 
-                        <div className="relative py-4">
-                            <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-100 dark:border-slate-800"></div></div>
-                            <div className="relative flex justify-center text-sm"><span className="px-4 bg-white dark:bg-slate-950 text-slate-400">Or continue with</span></div>
-                        </div>
-
-                        <button
-                            onClick={handleGuestLogin}
-                            className="w-full flex items-center justify-center gap-3 bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold py-4 px-6 rounded-2xl hover:opacity-90 transition-all shadow-xl shadow-slate-900/10"
-                        >
-                            <Layout className="w-5 h-5" />
-                            Guest Access
-                        </button>
                     </div>
 
                     <p className="text-center text-sm text-slate-400 mt-8">

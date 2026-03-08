@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Task, SubTask, TaskWeight, User } from '../types';
 import { Timestamp } from 'firebase/firestore';
-import { X, Plus, Trash2, Calendar, User as UserIcon, AlertCircle } from 'lucide-react';
+import { X, Plus, Trash2, Calendar, User as UserIcon, AlertCircle, Upload } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
@@ -38,7 +38,9 @@ const EditTaskModal: React.FC<EditTaskModalProps> = ({ isOpen, onClose, task, me
             id: `st-${Date.now()}`,
             title: '',
             status: 'todo',
-            deadline: Timestamp.now()
+            deadline: Timestamp.now(),
+            assignedTo: '',
+            requiresUpload: false
         };
         setSubTasks([...subTasks, newSubTask]);
     };
@@ -210,18 +212,36 @@ const EditTaskModal: React.FC<EditTaskModalProps> = ({ isOpen, onClose, task, me
                                                 </div>
 
                                                 {!isPersonal && (
-                                                    <div className="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 shadow-sm">
-                                                        <UserIcon className="w-3 h-3 text-slate-400" />
-                                                        <select
-                                                            value={st.assignedTo || ''}
-                                                            onChange={(e) => handleUpdateSubTask(st.id, { assignedTo: e.target.value || undefined })}
-                                                            className="bg-transparent text-[10px] font-bold text-blue-600 dark:text-blue-400 outline-none max-w-[100px]"
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 shadow-sm">
+                                                            <UserIcon className="w-3 h-3 text-slate-400" />
+                                                            <select
+                                                                value={st.assignedTo || ''}
+                                                                onChange={(e) => handleUpdateSubTask(st.id, { assignedTo: e.target.value || '' })}
+                                                                className="bg-transparent text-[10px] font-bold text-blue-600 dark:text-blue-400 outline-none max-w-[100px]"
+                                                            >
+                                                                <option value="">Unassigned</option>
+                                                                {members.map(m => (
+                                                                    <option key={m.uid} value={m.uid}>{m.displayName || m.username}</option>
+                                                                ))}
+                                                            </select>
+                                                        </div>
+
+                                                        {/* Sub-task File Toggle */}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleUpdateSubTask(st.id, { requiresUpload: !st.requiresUpload })}
+                                                            className={cn(
+                                                                "p-2 rounded-xl border transition-all flex items-center gap-2",
+                                                                st.requiresUpload
+                                                                    ? "bg-blue-50 border-blue-200 text-blue-600 dark:bg-blue-900/20 dark:border-blue-800"
+                                                                    : "bg-slate-50 border-slate-100 text-slate-400 dark:bg-slate-900/50 dark:border-slate-800"
+                                                            )}
+                                                            title="Require file upload for this sub-task"
                                                         >
-                                                            <option value="">Unassigned</option>
-                                                            {members.map(m => (
-                                                                <option key={m.uid} value={m.uid}>{m.displayName || m.username}</option>
-                                                            ))}
-                                                        </select>
+                                                            <Upload className="w-3.5 h-3.5" />
+                                                            {st.requiresUpload && <span className="text-[10px] font-black uppercase tracking-widest">Required</span>}
+                                                        </button>
                                                     </div>
                                                 )}
                                             </div>

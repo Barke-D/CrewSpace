@@ -50,8 +50,13 @@ export class AccountabilityEngine {
 
         const isTaskLate = (t: Task | SubTask) => {
             if (t.isLate) return true;
+            // If completed, check completion date
             if (t.status === 'done' && t.completedAt && t.deadline) {
                 return t.completedAt.toMillis() > t.deadline.toMillis();
+            }
+            // If not completed, check if current time is past deadline (Overdue)
+            if (t.status !== 'done' && t.deadline) {
+                return Date.now() > t.deadline.toMillis();
             }
             return false;
         };
