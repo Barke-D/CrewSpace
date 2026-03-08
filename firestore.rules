@@ -57,7 +57,7 @@ service cloud.firestore {
           (
             // 2. Others can only update status/assignedTo/metadata/subTasks/etc
             request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['status', 'completedBy', 'completedAt', 'isLate', 'subTasks', 'assignedTo', 'updatedAt'])
+              .hasOnly(['status', 'completedBy', 'completedAt', 'isLate', 'subTasks', 'assignedTo', 'updatedAt', 'submissionUrl', 'submissionFileName'])
           )
         );
       }
